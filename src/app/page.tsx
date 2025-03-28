@@ -1,12 +1,4 @@
-<<<<<<< Updated upstream
-export default function Home() {
-  return (
-    <h1 className="text-3xl font-bold underline">
-      Bonjour le monde !
-    </h1>
-  )
-}
-=======
+
 // src/app/page.tsx
 'use client';
 
@@ -140,4 +132,3 @@ export default function HomePage() {
     </main>
   );
 }
->>>>>>> Stashed changes
