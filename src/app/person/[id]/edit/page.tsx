@@ -1,16 +1,23 @@
-// src/app/person/[id]/edit/page.tsx et src/app/person/new/page.tsx (même composant réutilisé)
+// src/app/person/[id]/edit/page.tsx et src/app/person/new/page.tsx
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useFamily } from '@/context/FamilyContext';
 import { Person } from '@/lib/models/Person';
+import { Family } from '@/lib/models/Families';
 
 export default function PersonFormPage() {
   const params = useParams();
   const router = useRouter();
-  const { familyTree, loading, setFamilyTree } = useFamily();
+  const searchParams = useSearchParams();
+  const familyIdParam = searchParams.get('familyId');
+  const returnTo = searchParams.get('returnTo');
+  
+  const { families, activeFamily, loading, addPerson, updatePerson, deletePerson } = useFamily();
+  
+  const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
   const [isNew, setIsNew] = useState(true);
   const [formData, setFormData] = useState<Partial<Person>>({
     nom: '',
@@ -22,14 +29,30 @@ export default function PersonFormPage() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Déterminer la famille actuelle
+  useEffect(() => {
+    if (!loading && families.length > 0) {
+      let family: Family | null = null;
+      
+      if (familyIdParam) {
+        family = families.find(f => f.id === familyIdParam) || null;
+      } else if (activeFamily) {
+        family = activeFamily;
+      }
+      
+      setCurrentFamily(family);
+    }
+  }, [loading, families, activeFamily, familyIdParam]);
 
   // Déterminer si c'est un ajout ou une modification
   useEffect(() => {
     const id = params?.id;
     setIsNew(!id);
     
-    if (id && !loading && familyTree) {
-      const existingPerson = familyTree.persons.find(p => p.id === id);
+    if (id && currentFamily) {
+      const existingPerson = currentFamily.persons.find(p => p.id === id);
       if (existingPerson) {
         setFormData({
           ...existingPerson,
@@ -38,10 +61,14 @@ export default function PersonFormPage() {
         });
       } else {
         // Personne non trouvée, rediriger
-        router.push('/person');
+        if (currentFamily) {
+          router.push(`/person?familyId=${currentFamily.id}`);
+        } else {
+          router.push('/person');
+        }
       }
     }
-  }, [params, familyTree, loading, router]);
+  }, [params, currentFamily, router]);
 
   // Gestionnaire de changement de champ
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -103,15 +130,18 @@ export default function PersonFormPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!currentFamily) {
+      setErrors({
+        submit: "Aucun arbre généalogique sélectionné"
+      });
+      return;
+    }
+    
     if (!validateForm()) return;
     
     setIsSaving(true);
     
     try {
-      if (!familyTree) throw new Error("Données de l'arbre non disponibles");
-      
-      const updatedTree = { ...familyTree };
-      
       if (isNew) {
         // Générer un nouvel ID
         const newId = `p${Date.now()}`;
@@ -127,37 +157,32 @@ export default function PersonFormPage() {
           etat: formData.etat as 'vivant' | 'mort'
         };
         
-        updatedTree.persons = [...updatedTree.persons, newPerson];
-        updatedTree.metadata.dateMiseAJour = new Date().toISOString();
+        await addPerson(currentFamily.id, newPerson);
         
-        await setFamilyTree(updatedTree);
-        
-        // Rediriger vers la page de détail de la nouvelle personne
-        router.push(`/person/${newId}`);
+        // Rediriger
+        if (returnTo) {
+          router.push(returnTo);
+        } else {
+          router.push(`/person/${newId}?familyId=${currentFamily.id}`);
+        }
       } else {
         // Mise à jour d'une personne existante
         const personId = params?.id as string;
         
-        updatedTree.persons = updatedTree.persons.map(p => 
-          p.id === personId 
-            ? {
-                ...p,
-                nom: formData.nom || '',
-                prenom: formData.prenom || '',
-                sexe: formData.sexe as 'M' | 'F' | 'A',
-                birthDate: formData.birthDate || null,
-                deathDate: formData.deathDate || null,
-                etat: formData.etat as 'vivant' | 'mort'
-              }
-            : p
-        );
+        const updatedPerson: Person = {
+          id: personId,
+          nom: formData.nom || '',
+          prenom: formData.prenom || '',
+          sexe: formData.sexe as 'M' | 'F' | 'A',
+          birthDate: formData.birthDate || null,
+          deathDate: formData.deathDate || null,
+          etat: formData.etat as 'vivant' | 'mort'
+        };
         
-        updatedTree.metadata.dateMiseAJour = new Date().toISOString();
+        await updatePerson(currentFamily.id, updatedPerson);
         
-        await setFamilyTree(updatedTree);
-        
-        // Rediriger vers la page de détail de la personne mise à jour
-        router.push(`/person/${personId}`);
+        // Rediriger
+        router.push(`/person/${personId}?familyId=${currentFamily.id}`);
       }
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
@@ -172,39 +197,21 @@ export default function PersonFormPage() {
 
   // Suppression d'une personne
   const handleDelete = async () => {
-    if (!window.confirm('Êtes-vous sûr de vouloir supprimer cette personne ? Cette action est irréversible.')) {
+    if (!currentFamily || isNew) return;
+    
+    if (!window.confirm('Êtes-vous sûr de vouloir supprimer cette personne ? Cette action est irréversible et supprimera également toutes les relations associées.')) {
       return;
     }
     
-    setIsSaving(true);
+    setIsDeleting(true);
     
     try {
-      if (!familyTree) throw new Error("Données de l'arbre non disponibles");
-      
       const personId = params?.id as string;
       
-      // Suppression des relations associées
-      const updatedRelationships = familyTree.relationships.filter(
-        rel => rel.sourceId !== personId && rel.targetId !== personId
-      );
-      
-      // Suppression de la personne
-      const updatedPersons = familyTree.persons.filter(p => p.id !== personId);
-      
-      const updatedTree = {
-        ...familyTree,
-        persons: updatedPersons,
-        relationships: updatedRelationships,
-        metadata: {
-          ...familyTree.metadata,
-          dateMiseAJour: new Date().toISOString()
-        }
-      };
-      
-      await setFamilyTree(updatedTree);
+      await deletePerson(currentFamily.id, personId);
       
       // Rediriger vers la liste des personnes
-      router.push('/person');
+      router.push(`/person?familyId=${currentFamily.id}`);
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
       setErrors(prev => ({
@@ -212,7 +219,7 @@ export default function PersonFormPage() {
         submit: "Une erreur est survenue lors de la suppression"
       }));
     } finally {
-      setIsSaving(false);
+      setIsDeleting(false);
     }
   };
 
@@ -227,10 +234,27 @@ export default function PersonFormPage() {
     );
   }
 
+  if (!currentFamily) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-white rounded-lg shadow-md p-6 text-center">
+          <h2 className="text-2xl font-semibold mb-4">Aucun arbre généalogique sélectionné</h2>
+          <p className="mb-6">Veuillez sélectionner un arbre généalogique pour ajouter ou modifier une personne.</p>
+          <Link href="/family" className="btn btn-primary">
+            Voir mes arbres généalogiques
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-6">
-        <Link href={isNew ? "/person" : `/person/${params?.id}`} className="text-blue-600 hover:underline inline-flex items-center">
+        <Link 
+          href={isNew ? `/person?familyId=${currentFamily.id}` : `/person/${params?.id}?familyId=${currentFamily.id}`} 
+          className="text-blue-600 hover:underline inline-flex items-center"
+        >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clipRule="evenodd" />
           </svg>
@@ -359,16 +383,16 @@ export default function PersonFormPage() {
                   type="button"
                   onClick={handleDelete}
                   className="btn btn-danger"
-                  disabled={isSaving}
+                  disabled={isDeleting}
                 >
-                  Supprimer
+                  {isDeleting ? 'Suppression...' : 'Supprimer'}
                 </button>
               )}
             </div>
             
             <div className="flex gap-4 mt-4 md:mt-0">
               <Link 
-                href={isNew ? "/person" : `/person/${params?.id}`}
+                href={isNew ? `/person?familyId=${currentFamily.id}` : `/person/${params?.id}?familyId=${currentFamily.id}`}
                 className="btn btn-secondary"
               >
                 Annuler
@@ -379,17 +403,7 @@ export default function PersonFormPage() {
                 className="btn btn-primary"
                 disabled={isSaving}
               >
-                {isSaving ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Enregistrement...
-                  </>
-                ) : (
-                  'Enregistrer'
-                )}
+                {isSaving ? 'Enregistrement...' : 'Enregistrer'}
               </button>
             </div>
           </div>

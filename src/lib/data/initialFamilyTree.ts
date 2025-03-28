@@ -1,9 +1,13 @@
-// src/lib/data/initialFamilyTree.ts
-import { FamilyTreeData } from '../models/FamilyTree';
-// import { Person } from '../models/Person';
-// import { Relationship, RelationType, RelationSubType } from '../models/Relationship';
+// src/lib/data/initialData.ts
+import { FamiliesData, Family } from '../models/Families';
+import { Person } from '../models/Person';
+import { Relationship } from '../models/Relationship';
 
-export const initialFamilyTreeData: FamilyTreeData = {
+// Créer une famille Martin
+const familyMartin: Family = {
+  id: 'family-martin',
+  name: 'Famille Martin',
+  description: 'Arbre généalogique de la famille Martin',
   persons: [
     {
       id: "p1",
@@ -171,9 +175,112 @@ export const initialFamilyTreeData: FamilyTreeData = {
       dateFin: null
     }
   ],
-  metadata: {
-    nom: "Famille Martin",
-    dateCreation: "2025-03-28T10:00:00Z",
-    dateMiseAJour: "2025-03-28T10:00:00Z"
-  }
+  createdAt: "2025-03-28T10:00:00Z",
+  updatedAt: "2025-03-28T10:00:00Z"
+};
+
+// Créer une famille Durand
+const familyDurand: Family = {
+  id: 'family-durand',
+  name: 'Famille Durand',
+  description: 'Arbre généalogique de la famille Durand',
+  persons: [
+    {
+      id: "d1",
+      nom: "Durand",
+      prenom: "Pierre",
+      sexe: "M",
+      birthDate: "1945-10-05",
+      deathDate: null,
+      etat: "vivant"
+    },
+    {
+      id: "d2",
+      nom: "Moreau",
+      prenom: "Jeanne",
+      sexe: "F",
+      birthDate: "1948-04-12",
+      deathDate: "2020-08-30",
+      etat: "mort"
+    },
+    {
+      id: "d3",
+      nom: "Durand",
+      prenom: "Marc",
+      sexe: "M",
+      birthDate: "1970-07-22",
+      deathDate: null,
+      etat: "vivant"
+    },
+    {
+      id: "d4",
+      nom: "Durand",
+      prenom: "Claire",
+      sexe: "F",
+      birthDate: "1972-11-03",
+      deathDate: null,
+      etat: "vivant"
+    }
+  ],
+  relationships: [
+    // Pierre et Jeanne sont mariés
+    {
+      id: "rd1",
+      type: "conjoint",
+      sourceId: "d1",
+      targetId: "d2",
+      sousType: "marie",
+      dateDebut: "1969-04-18",
+      dateFin: null
+    },
+    // Pierre est le père de Marc
+    {
+      id: "rd2",
+      type: "parent",
+      sourceId: "d1",
+      targetId: "d3",
+      sousType: "pere",
+      dateDebut: null,
+      dateFin: null
+    },
+    // Jeanne est la mère de Marc
+    {
+      id: "rd3",
+      type: "parent",
+      sourceId: "d2",
+      targetId: "d3",
+      sousType: "mere",
+      dateDebut: null,
+      dateFin: null
+    },
+    // Pierre est le père de Claire
+    {
+      id: "rd4",
+      type: "parent",
+      sourceId: "d1",
+      targetId: "d4",
+      sousType: "pere",
+      dateDebut: null,
+      dateFin: null
+    },
+    // Jeanne est la mère de Claire
+    {
+      id: "rd5",
+      type: "parent",
+      sourceId: "d2",
+      targetId: "d4",
+      sousType: "mere",
+      dateDebut: null,
+      dateFin: null
+    }
+  ],
+  createdAt: "2025-03-28T11:00:00Z",
+  updatedAt: "2025-03-28T11:00:00Z"
+};
+
+// Données initiales complètes
+export const initialFamiliesData: FamiliesData = {
+  families: [familyMartin, familyDurand],
+  activeFamilyId: 'family-martin',
+  lastUpdated: "2025-03-28T11:00:00Z"
 };

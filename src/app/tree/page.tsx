@@ -2,51 +2,101 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import { useFamily } from '../../context/FamilyContext';
-import { Person } from '../../lib/models/Person';
-import { TreeLayout, TreeNode } from '../../lib/algorithms/treeLayout';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useFamily } from '@/context/FamilyContext';
+import { Person } from '@/lib/models/Person';
+import { Family } from '@/lib/models/Families';
 
 export default function TreeViewPage() {
-  const { familyTree, loading } = useFamily();
+  const searchParams = useSearchParams();
+  const familyIdParam = searchParams.get('familyId');
+  const rootIdParam = searchParams.get('rootId');
+  
+  const { families, activeFamily, loading } = useFamily();
+  const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
+  const [rootPerson, setRootPerson] = useState<Person | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
-  const [rootPersonId, setRootPersonId] = useState<string | null>(null);
-  const [treeLayout, setTreeLayout] = useState<TreeLayout | null>(null);
+  
   const [zoomLevel, setZoomLevel] = useState(1);
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragState, setDragState] = useState({ isDragging: false, startX: 0, startY: 0 });
   const [viewBox, setViewBox] = useState({ x: 0, y: 0, width: 1000, height: 600 });
+  
+  const [treeNodes, setTreeNodes] = useState<TreeNode[]>([]);
+  const [treeEdges, setTreeEdges] = useState<TreeEdge[]>([]);
 
-  // Initialiser l'ID de personne racine
+  // Déterminer la famille actuelle
   useEffect(() => {
-    if (familyTree && familyTree.persons.length > 0 && !rootPersonId) {
-      setRootPersonId(familyTree.persons[0].id);
+    if (!loading && families.length > 0) {
+      let family: Family | null = null;
+      
+      if (familyIdParam) {
+        family = families.find(f => f.id === familyIdParam) || null;
+      } else if (activeFamily) {
+        family = activeFamily;
+      }
+      
+      setCurrentFamily(family);
     }
-  }, [familyTree, rootPersonId]);
+  }, [loading, families, activeFamily, familyIdParam]);
 
-  // Générer la disposition de l'arbre quand rootPersonId change
+  // Déterminer la personne racine
   useEffect(() => {
-    if (familyTree && rootPersonId) {
+    if (currentFamily) {
+      let root: Person | null = null;
+      
+      if (rootIdParam) {
+        root = currentFamily.persons.find(p => p.id === rootIdParam) || null;
+      }
+      
+      if (!root && currentFamily.persons.length > 0) {
+        // Trouver la personne avec le plus de relations
+        const personRelationsCount = currentFamily.persons.map(person => {
+          const relationsCount = currentFamily.relationships.filter(
+            rel => rel.sourceId === person.id || rel.targetId === person.id
+          ).length;
+          
+          return { person, relationsCount };
+        });
+        
+        const mostConnectedPerson = personRelationsCount.reduce((most, current) => 
+          current.relationsCount > most.relationsCount ? current : most,
+          { person: currentFamily.persons[0], relationsCount: 0 }
+        );
+        
+        root = mostConnectedPerson.person;
+      }
+      
+      setRootPerson(root);
+    } else {
+      setRootPerson(null);
+    }
+  }, [currentFamily, rootIdParam]);
+
+  // Générer l'arbre quand la personne racine change
+  useEffect(() => {
+    if (currentFamily && rootPerson) {
       try {
-        // Utilisation d'une version simplifiée pour l'exemple
-        // Dans une implémentation complète, vous utiliseriez l'algorithme treeLayout
-        const layout = generateSimpleTreeLayout(familyTree.persons, familyTree.relationships, rootPersonId);
-        setTreeLayout(layout);
+        const { nodes, edges } = generateTreeLayout(currentFamily, rootPerson.id);
+        setTreeNodes(nodes);
+        setTreeEdges(edges);
         
         // Réinitialiser la vue
-        if (layout) {
-          setViewBox({
-            x: -layout.width / 4,
-            y: -50,
-            width: layout.width * 1.5,
-            height: layout.height * 1.5
-          });
-        }
+        setViewBox({
+          x: -100,
+          y: -50,
+          width: 1000,
+          height: 600
+        });
       } catch (error) {
         console.error("Erreur lors de la génération du layout:", error);
       }
+    } else {
+      setTreeNodes([]);
+      setTreeEdges([]);
     }
-  }, [familyTree, rootPersonId]);
+  }, [currentFamily, rootPerson]);
 
   // Fonction de zoom
   const handleZoom = (factor: number) => {
@@ -76,9 +126,9 @@ export default function TreeViewPage() {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (dragState.isDragging) {
-      const dx = (e.clientX - dragState.startX) * (viewBox.width / svgRef.current!.clientWidth);
-      const dy = (e.clientY - dragState.startY) * (viewBox.height / svgRef.current!.clientHeight);
+    if (dragState.isDragging && svgRef.current) {
+      const dx = (e.clientX - dragState.startX) * (viewBox.width / svgRef.current.clientWidth);
+      const dy = (e.clientY - dragState.startY) * (viewBox.height / svgRef.current.clientHeight);
       
       setViewBox(prev => ({
         ...prev,
@@ -100,115 +150,29 @@ export default function TreeViewPage() {
 
   // Fonction pour sélectionner une personne
   const handleSelectPerson = (person: Person) => {
-    setSelectedPerson(person);
+    setSelectedPerson(prev => prev?.id === person.id ? null : person);
   };
-
-  // Fonction pour centrer l'arbre sur une personne
-  const handleCenterOnPerson = (personId: string) => {
-    setRootPersonId(personId);
-    setSelectedPerson(null);
-  };
-
-  // Fonction simplifiée de génération d'arbre (à remplacer par votre algorithme)
-  function generateSimpleTreeLayout(persons: Person[], relationships: any[], rootId: string): TreeLayout {
-    // Créer une carte pour un accès rapide aux personnes
-    const personsMap = new Map(persons.map(p => [p.id, p]));
-    
-    // Trouver la personne racine
-    const rootPerson = personsMap.get(rootId);
-    if (!rootPerson) throw new Error("Personne racine non trouvée");
-    
-    // Créer un nœud pour la personne racine
-    const nodes: TreeNode[] = [
-      {
-        id: rootPerson.id,
-        person: rootPerson,
-        x: 500,
-        y: 100,
-        level: 0,
-        spouseNodes: [],
-        childrenNodes: [],
-        parentNodes: []
-      }
-    ];
-    
-    // Exemple simplifié: ajouter quelques nœuds enfants
-    const childRelations = relationships.filter(r => 
-      r.type === 'parent' && r.sourceId === rootId
-    );
-    
-    // Positionner les enfants
-    const childSpacing = 200;
-    const totalWidth = childRelations.length * childSpacing;
-    const startX = 500 - (totalWidth / 2) + (childSpacing / 2);
-    
-    childRelations.forEach((rel, index) => {
-      const childPerson = personsMap.get(rel.targetId);
-      if (childPerson) {
-        nodes.push({
-          id: childPerson.id,
-          person: childPerson,
-          x: startX + (index * childSpacing),
-          y: 250,
-          level: 1,
-          spouseNodes: [],
-          childrenNodes: [],
-          parentNodes: []
-        });
-      }
-    });
-    
-    // Ajouter des conjoints (simplifiés)
-    const spouseRelations = relationships.filter(r =>
-      r.type === 'conjoint' && (r.sourceId === rootId || r.targetId === rootId)
-    );
-    
-    if (spouseRelations.length > 0) {
-      const spouse = spouseRelations[0];
-      const spouseId = spouse.sourceId === rootId ? spouse.targetId : spouse.sourceId;
-      const spousePerson = personsMap.get(spouseId);
-      
-      if (spousePerson) {
-        nodes.push({
-          id: spousePerson.id,
-          person: spousePerson,
-          x: 700,
-          y: 100,
-          level: 0,
-          spouseNodes: [],
-          childrenNodes: [],
-          parentNodes: []
-        });
-      }
-    }
-    
-    // Ajouter des arêtes (simplifiées)
-    const edges = relationships.filter(r =>
-      (r.sourceId === rootId || r.targetId === rootId) &&
-      nodes.some(n => n.id === r.sourceId) &&
-      nodes.some(n => n.id === r.targetId)
-    ).map(r => ({
-      id: `edge-${r.id}`,
-      source: r.sourceId,
-      target: r.targetId,
-      type: r.type === 'conjoint' ? 'spouse' : 'parent-child',
-      relationship: r
-    }));
-    
-    return {
-      nodes,
-      edges,
-      width: 1000,
-      height: 400
-    };
-  }
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">Chargement de l'arbre généalogique...</h2>
+          <h2 className="text-xl font-semibold mb-2">Chargement des données...</h2>
           <div className="w-12 h-12 border-4 border-t-blue-500 border-b-blue-700 rounded-full animate-spin mx-auto"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentFamily) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-white rounded-lg shadow-md p-6 text-center">
+          <h2 className="text-xl font-semibold mb-2">Aucun arbre généalogique sélectionné</h2>
+          <p className="text-gray-600 mb-6">Veuillez sélectionner un arbre généalogique pour visualiser l'arbre.</p>
+          <Link href="/family" className="btn btn-primary">
+            Voir mes arbres généalogiques
+          </Link>
         </div>
       </div>
     );
@@ -216,8 +180,17 @@ export default function TreeViewPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      <div className="mb-6">
+        <Link href={`/family/${currentFamily.id}`} className="text-blue-600 hover:underline inline-flex items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clipRule="evenodd" />
+          </svg>
+          Retour à {currentFamily.name}
+        </Link>
+      </div>
+      
       <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between">
-        <h1 className="text-3xl font-bold mb-4 md:mb-0">Arbre Généalogique</h1>
+        <h1 className="text-3xl font-bold mb-4 md:mb-0">Arbre Généalogique - {currentFamily.name}</h1>
         
         <div className="flex flex-wrap gap-3">
           <button
@@ -237,13 +210,17 @@ export default function TreeViewPage() {
             </svg>
           </button>
           
-          {rootPersonId && (
+          {currentFamily.persons.length > 0 && (
             <select
-              value={rootPersonId}
-              onChange={(e) => handleCenterOnPerson(e.target.value)}
+              value={rootPerson?.id || ''}
+              onChange={(e) => {
+                const newRootId = e.target.value;
+                window.location.href = `/tree?familyId=${currentFamily.id}${newRootId ? `&rootId=${newRootId}` : ''}`;
+              }}
               className="form-input rounded-md px-4 py-2 border border-gray-300"
             >
-              {familyTree?.persons.map(person => (
+              <option value="" disabled>Centrer sur une personne</option>
+              {currentFamily.persons.map(person => (
                 <option key={person.id} value={person.id}>
                   {person.prenom} {person.nom}
                 </option>
@@ -258,94 +235,104 @@ export default function TreeViewPage() {
           className="w-full h-[600px] border border-gray-200 rounded-lg overflow-hidden"
           style={{ cursor: dragState.isDragging ? 'grabbing' : 'grab' }}
         >
-          <svg
-            ref={svgRef}
-            width="100%"
-            height="100%"
-            viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-          >
-            {/* Lignes de connexion */}
-            {treeLayout && treeLayout.edges.map(edge => {
-              const sourceNode = treeLayout.nodes.find(n => n.id === edge.source);
-              const targetNode = treeLayout.nodes.find(n => n.id === edge.target);
-              
-              if (!sourceNode || !targetNode) return null;
-              
-              return (
-                <line
-                  key={edge.id}
-                  x1={sourceNode.x}
-                  y1={sourceNode.y}
-                  x2={targetNode.x}
-                  y2={targetNode.y}
-                  stroke={edge.type === 'spouse' ? '#F87171' : '#60A5FA'}
-                  strokeWidth="2"
-                  strokeDasharray={edge.type === 'spouse' ? "5,5" : ""}
-                />
-              );
-            })}
-            
-            {/* Nœuds */}
-            {treeLayout && treeLayout.nodes.map(node => {
-              const isSelected = selectedPerson?.id === node.id;
-              const isMale = node.person.sexe === 'M';
-              const isFemale = node.person.sexe === 'F';
-              
-              const rectWidth = 150;
-              const rectHeight = 80;
-              
-              return (
-                <g
-                  key={node.id}
-                  transform={`translate(${node.x - rectWidth/2}, ${node.y - rectHeight/2})`}
-                  onClick={() => handleSelectPerson(node.person)}
-                  className="cursor-pointer"
-                >
-                  <rect
-                    width={rectWidth}
-                    height={rectHeight}
-                    rx="8"
-                    ry="8"
-                    fill={isMale ? '#DBEAFE' : isFemale ? '#FCE7F3' : '#F3F4F6'}
-                    stroke={isSelected ? '#2563EB' : '#9CA3AF'}
-                    strokeWidth={isSelected ? "3" : "1"}
+          {treeNodes.length > 0 ? (
+            <svg
+              ref={svgRef}
+              width="100%"
+              height="100%"
+              viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+            >
+              {/* Lignes de connexion */}
+              {treeEdges.map(edge => {
+                const sourceNode = treeNodes.find(n => n.id === edge.source);
+                const targetNode = treeNodes.find(n => n.id === edge.target);
+                
+                if (!sourceNode || !targetNode) return null;
+                
+                return (
+                  <line
+                    key={edge.id}
+                    x1={sourceNode.x}
+                    y1={sourceNode.y}
+                    x2={targetNode.x}
+                    y2={targetNode.y}
+                    stroke={edge.type === 'spouse' ? '#F87171' : '#60A5FA'}
+                    strokeWidth="2"
+                    strokeDasharray={edge.type === 'spouse' ? "5,5" : ""}
                   />
-                  <text
-                    x="75"
-                    y="30"
-                    textAnchor="middle"
-                    className="text-sm font-medium"
-                    fill="#111827"
+                );
+              })}
+              
+              {/* Nœuds */}
+              {treeNodes.map(node => {
+                const isSelected = selectedPerson?.id === node.id;
+                const isMale = node.person.sexe === 'M';
+                const isFemale = node.person.sexe === 'F';
+                
+                const rectWidth = 150;
+                const rectHeight = 80;
+                
+                return (
+                  <g
+                    key={node.id}
+                    transform={`translate(${node.x - rectWidth/2}, ${node.y - rectHeight/2})`}
+                    onClick={() => handleSelectPerson(node.person)}
+                    className="cursor-pointer"
                   >
-                    {node.person.prenom}
-                  </text>
-                  <text
-                    x="75"
-                    y="50"
-                    textAnchor="middle"
-                    className="text-sm font-medium"
-                    fill="#111827"
-                  >
-                    {node.person.nom}
-                  </text>
-                  <text
-                    x="75"
-                    y="70"
-                    textAnchor="middle"
-                    className="text-xs"
-                    fill="#4B5563"
-                  >
-                    {node.person.birthDate ? new Date(node.person.birthDate).getFullYear() : "?"} - 
-                    {node.person.deathDate ? new Date(node.person.deathDate).getFullYear() : node.person.etat === "vivant" ? "présent" : "?"}
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
+                    <rect
+                      width={rectWidth}
+                      height={rectHeight}
+                      rx="8"
+                      ry="8"
+                      fill={isMale ? '#DBEAFE' : isFemale ? '#FCE7F3' : '#F3F4F6'}
+                      stroke={isSelected ? '#2563EB' : '#9CA3AF'}
+                      strokeWidth={isSelected ? "3" : "1"}
+                    />
+                    <text
+                      x="75"
+                      y="30"
+                      textAnchor="middle"
+                      className="text-sm font-medium"
+                      fill="#111827"
+                    >
+                      {node.person.prenom}
+                    </text>
+                    <text
+                      x="75"
+                      y="50"
+                      textAnchor="middle"
+                      className="text-sm font-medium"
+                      fill="#111827"
+                    >
+                      {node.person.nom}
+                    </text>
+                    <text
+                      x="75"
+                      y="70"
+                      textAnchor="middle"
+                      className="text-xs"
+                      fill="#4B5563"
+                    >
+                      {node.person.birthDate ? new Date(node.person.birthDate).getFullYear() : "?"} - 
+                      {node.person.deathDate ? new Date(node.person.deathDate).getFullYear() : node.person.etat === "vivant" ? "présent" : "?"}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-gray-500">
+                {currentFamily.persons.length === 0 
+                  ? "Cet arbre généalogique est vide. Ajoutez des personnes pour commencer."
+                  : "Impossible de générer l'arbre. Vérifiez les relations entre les personnes."}
+              </p>
+            </div>
+          )}
         </div>
       </div>
       
@@ -356,14 +343,14 @@ export default function TreeViewPage() {
               {selectedPerson.prenom} {selectedPerson.nom}
             </h2>
             <div className="flex gap-2">
-              <button
-                onClick={() => handleCenterOnPerson(selectedPerson.id)}
+              <Link
+                href={`/tree?familyId=${currentFamily.id}&rootId=${selectedPerson.id}`}
                 className="btn btn-primary px-4 py-2"
               >
                 Centrer l'arbre
-              </button>
+              </Link>
               <Link
-                href={`/person/${selectedPerson.id}`}
+                href={`/person/${selectedPerson.id}?familyId=${currentFamily.id}`}
                 className="btn btn-secondary px-4 py-2"
               >
                 Voir profil
@@ -384,12 +371,12 @@ export default function TreeViewPage() {
             <div>
               <h3 className="text-lg font-medium mb-2">Relations</h3>
               <ul className="space-y-2">
-                {familyTree?.relationships
+                {currentFamily.relationships
                   .filter(rel => rel.sourceId === selectedPerson.id || rel.targetId === selectedPerson.id)
                   .map(rel => {
                     const isSource = rel.sourceId === selectedPerson.id;
                     const otherId = isSource ? rel.targetId : rel.sourceId;
-                    const otherPerson = familyTree.persons.find(p => p.id === otherId);
+                    const otherPerson = currentFamily.persons.find(p => p.id === otherId);
                     
                     if (!otherPerson) return null;
                     
@@ -406,7 +393,10 @@ export default function TreeViewPage() {
                       <li key={rel.id}>
                         <span className="font-medium">{relationLabel}</span>{' '}
                         <button
-                          onClick={() => handleSelectPerson(otherPerson)}
+                          onClick={() => {
+                            const person = currentFamily.persons.find(p => p.id === otherId);
+                            if (person) setSelectedPerson(person);
+                          }}
                           className="text-blue-600 hover:underline"
                         >
                           {otherPerson.prenom} {otherPerson.nom}
@@ -421,4 +411,140 @@ export default function TreeViewPage() {
       )}
     </div>
   );
+}
+
+// Types pour l'arbre
+interface TreeNode {
+  id: string;
+  person: Person;
+  x: number;
+  y: number;
+  level: number;
+}
+
+interface TreeEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: 'parent-child' | 'spouse';
+}
+
+// Fonction simplifiée pour générer le layout de l'arbre
+function generateTreeLayout(family: Family, rootId: string): { nodes: TreeNode[], edges: TreeEdge[] } {
+  const nodes: TreeNode[] = [];
+  const edges: TreeEdge[] = [];
+  const processed = new Set<string>();
+  
+  // Trouver la personne racine
+  const rootPerson = family.persons.find(p => p.id === rootId);
+  if (!rootPerson) {
+    throw new Error("Personne racine non trouvée");
+  }
+  
+  // Ajouter la racine au centre
+  nodes.push({
+    id: rootPerson.id,
+    person: rootPerson,
+    x: 0,
+    y: 0,
+    level: 0
+  });
+  processed.add(rootPerson.id);
+  
+  // Ajouter les conjoints (à droite)
+  const spouseRelations = family.relationships.filter(r => 
+    r.type === 'conjoint' && (r.sourceId === rootId || r.targetId === rootId)
+  );
+  
+  let spouseX = 200;
+  for (const rel of spouseRelations) {
+    const spouseId = rel.sourceId === rootId ? rel.targetId : rel.sourceId;
+    const spouse = family.persons.find(p => p.id === spouseId);
+    
+    if (spouse && !processed.has(spouseId)) {
+      nodes.push({
+        id: spouseId,
+        person: spouse,
+        x: spouseX,
+        y: 0,
+        level: 0
+      });
+      
+      edges.push({
+        id: `edge-spouse-${rel.id}`,
+        source: rootId,
+        target: spouseId,
+        type: 'spouse'
+      });
+      
+      processed.add(spouseId);
+      spouseX += 200;
+    }
+  }
+  
+  // Ajouter les parents (en haut)
+  const parentRelations = family.relationships.filter(r => 
+    r.type === 'parent' && r.targetId === rootId
+  );
+  
+  let parentX = -200;
+  for (const rel of parentRelations) {
+    const parentId = rel.sourceId;
+    const parent = family.persons.find(p => p.id === parentId);
+    
+    if (parent && !processed.has(parentId)) {
+      nodes.push({
+        id: parentId,
+        person: parent,
+        x: parentX,
+        y: -150,
+        level: -1
+      });
+      
+      edges.push({
+        id: `edge-parent-${rel.id}`,
+        source: parentId,
+        target: rootId,
+        type: 'parent-child'
+      });
+      
+      processed.add(parentId);
+      parentX += 200;
+    }
+  }
+  
+  // Ajouter les enfants (en bas)
+  const childRelations = family.relationships.filter(r => 
+    r.type === 'parent' && r.sourceId === rootId
+  );
+  
+  let childCount = childRelations.length;
+  let childX = -(childCount * 100) + 100;
+  
+  for (const rel of childRelations) {
+    const childId = rel.targetId;
+    const child = family.persons.find(p => p.id === childId);
+    
+    if (child && !processed.has(childId)) {
+      nodes.push({
+        id: childId,
+        person: child,
+        x: childX,
+        y: 150,
+        level: 1
+      });
+      
+      edges.push({
+        id: `edge-child-${rel.id}`,
+        source: rootId,
+        target: childId,
+        type: 'parent-child'
+      });
+      
+      processed.add(childId);
+      childX += 200;
+    }
+  }
+  
+  return { nodes, edges };
 }

@@ -2,17 +2,23 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useFamily } from '../../../context/FamilyContext';
-import { Person } from '../../../lib/models/Person';
-import { Relationship } from '../../../lib/models/Relationship';
-import { findRelationshipPath } from '../../../lib/algorithms/pathFinding';
+import { useFamily } from '@/context/FamilyContext';
+import { Person } from '@/lib/models/Person';
+import { Relationship } from '@/lib/models/Relationship';
+import { Family } from '@/lib/models/Families';
+import { calculateAge } from '@/lib/utils/dateUtils';
 
 export default function PersonDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { familyTree, loading } = useFamily();
+  const searchParams = useSearchParams();
+  const familyIdParam = searchParams.get('familyId');
+  
+  const { families, activeFamily, loading } = useFamily();
+  
+  const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
   const [person, setPerson] = useState<Person | null>(null);
   const [relations, setRelations] = useState<{ 
     parents: {person: Person, relation: Relationship}[],
@@ -24,11 +30,26 @@ export default function PersonDetailPage() {
     spouses: []
   });
 
+  // Déterminer la famille actuelle
+  useEffect(() => {
+    if (!loading && families.length > 0) {
+      let family: Family | null = null;
+      
+      if (familyIdParam) {
+        family = families.find(f => f.id === familyIdParam) || null;
+      } else if (activeFamily) {
+        family = activeFamily;
+      }
+      
+      setCurrentFamily(family);
+    }
+  }, [loading, families, activeFamily, familyIdParam]);
+
   // Charger les détails de la personne
   useEffect(() => {
-    if (!loading && familyTree && params.id) {
+    if (currentFamily && params.id) {
       const personId = params.id as string;
-      const foundPerson = familyTree.persons.find(p => p.id === personId);
+      const foundPerson = currentFamily.persons.find(p => p.id === personId);
       
       if (foundPerson) {
         setPerson(foundPerson);
@@ -38,14 +59,14 @@ export default function PersonDetailPage() {
         const personChildren: {person: Person, relation: Relationship}[] = [];
         const personSpouses: {person: Person, relation: Relationship}[] = [];
         
-        familyTree.relationships.forEach(rel => {
+        currentFamily.relationships.forEach(rel => {
           const isSource = rel.sourceId === personId;
           const isTarget = rel.targetId === personId;
           
           if (!isSource && !isTarget) return;
           
           const otherId = isSource ? rel.targetId : rel.sourceId;
-          const otherPerson = familyTree.persons.find(p => p.id === otherId);
+          const otherPerson = currentFamily.persons.find(p => p.id === otherId);
           
           if (!otherPerson) return;
           
@@ -67,12 +88,12 @@ export default function PersonDetailPage() {
           children: personChildren,
           spouses: personSpouses
         });
-      } else {
+      } else if (currentFamily) {
         // Personne non trouvée, rediriger
-        router.push('/person');
+        router.push(`/person?familyId=${currentFamily.id}`);
       }
     }
-  }, [familyTree, loading, params.id, router]);
+  }, [currentFamily, params.id, router]);
 
   if (loading) {
     return (
@@ -85,13 +106,27 @@ export default function PersonDetailPage() {
     );
   }
 
+  if (!currentFamily) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-white rounded-lg shadow-md p-6 text-center">
+          <h2 className="text-2xl font-semibold mb-4">Aucun arbre généalogique sélectionné</h2>
+          <p className="mb-6">Veuillez sélectionner un arbre généalogique pour voir les détails d'une personne.</p>
+          <Link href="/family" className="btn btn-primary">
+            Voir mes arbres généalogiques
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (!person) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="bg-white rounded-lg shadow-md p-6 text-center">
           <h2 className="text-2xl font-semibold mb-4">Personne non trouvée</h2>
-          <p className="mb-6">La personne que vous recherchez nexiste pas dans larbre généalogique.</p>
-          <Link href="/person" className="btn btn-primary">
+          <p className="mb-6">La personne que vous recherchez n'existe pas dans cet arbre généalogique.</p>
+          <Link href={`/person?familyId=${currentFamily.id}`} className="btn btn-primary">
             Retour à la liste des personnes
           </Link>
         </div>
@@ -102,7 +137,7 @@ export default function PersonDetailPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-6">
-        <Link href="/person" className="text-blue-600 hover:underline inline-flex items-center">
+        <Link href={`/person?familyId=${currentFamily.id}`} className="text-blue-600 hover:underline inline-flex items-center">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clipRule="evenodd" />
           </svg>
@@ -123,7 +158,7 @@ export default function PersonDetailPage() {
         
         <div className="mt-4 md:mt-0 flex flex-wrap gap-3">
           <Link 
-            href={`/person/${person.id}/edit`} 
+            href={`/person/${person.id}/edit?familyId=${currentFamily.id}`} 
             className="btn btn-primary inline-flex items-center"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
@@ -133,13 +168,13 @@ export default function PersonDetailPage() {
           </Link>
           
           <Link 
-            href={`/tree?root=${person.id}`} 
+            href={`/tree?familyId=${currentFamily.id}&rootId=${person.id}`} 
             className="btn btn-secondary inline-flex items-center"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
               <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
             </svg>
-            Voir dans larbre
+            Voir dans l'arbre
           </Link>
         </div>
       </div>
@@ -214,7 +249,7 @@ export default function PersonDetailPage() {
                         {relation.sousType === 'pere' ? 'Père' : relation.sousType === 'mere' ? 'Mère' : 'Parent'}
                       </span>
                       <Link 
-                        href={`/person/${parent.id}`}
+                        href={`/person/${parent.id}?familyId=${currentFamily.id}`}
                         className="text-blue-600 hover:underline"
                       >
                         {parent.prenom} {parent.nom}
@@ -238,7 +273,7 @@ export default function PersonDetailPage() {
                         {relation.sousType === 'marie' ? 'Marié(e)' : 'Partenaire'}
                       </span>
                       <Link 
-                        href={`/person/${spouse.id}`}
+                        href={`/person/${spouse.id}?familyId=${currentFamily.id}`}
                         className="text-blue-600 hover:underline"
                       >
                         {spouse.prenom} {spouse.nom}
@@ -267,7 +302,7 @@ export default function PersonDetailPage() {
                         {relation.sousType === 'adopte' ? 'Adopté(e)' : 'Biologique'}
                       </span>
                       <Link 
-                        href={`/person/${child.id}`}
+                        href={`/person/${child.id}?familyId=${currentFamily.id}`}
                         className="text-blue-600 hover:underline"
                       >
                         {child.prenom} {child.nom}
@@ -288,19 +323,19 @@ export default function PersonDetailPage() {
               <h3 className="text-lg font-medium mb-3">Ajouter une relation</h3>
               <div className="flex flex-wrap gap-3">
                 <Link 
-                  href={`/relationship/new?type=parent&targetId=${person.id}`}
+                  href={`/relationship/new?type=parent&targetId=${person.id}&familyId=${currentFamily.id}`}
                   className="btn btn-secondary text-sm"
                 >
                   Ajouter un parent
                 </Link>
                 <Link 
-                  href={`/relationship/new?type=conjoint&sourceId=${person.id}`}
+                  href={`/relationship/new?type=conjoint&sourceId=${person.id}&familyId=${currentFamily.id}`}
                   className="btn btn-secondary text-sm"
                 >
                   Ajouter un conjoint
                 </Link>
                 <Link 
-                  href={`/relationship/new?type=child&sourceId=${person.id}`}
+                  href={`/relationship/new?type=parent&sourceId=${person.id}&familyId=${currentFamily.id}`}
                   className="btn btn-secondary text-sm"
                 >
                   Ajouter un enfant
@@ -324,12 +359,12 @@ export default function PersonDetailPage() {
             className="form-input rounded-md px-4 py-2 border border-gray-300 flex-grow"
             onChange={(e) => {
               if (e.target.value) {
-                router.push(`/relationship/analyzer?person1=${person.id}&person2=${e.target.value}`);
+                router.push(`/relationship/analyzer?person1=${person.id}&person2=${e.target.value}&familyId=${currentFamily.id}`);
               }
             }}
           >
             <option value="">Sélectionner une personne</option>
-            {familyTree?.persons
+            {currentFamily.persons
               .filter(p => p.id !== person.id)
               .map(p => (
                 <option key={p.id} value={p.id}>{p.prenom} {p.nom}</option>
@@ -338,7 +373,7 @@ export default function PersonDetailPage() {
           
           <button
             className="btn btn-primary"
-            onClick={() => router.push(`/relationship/analyzer?person1=${person.id}`)}
+            onClick={() => router.push(`/relationship/analyzer?person1=${person.id}&familyId=${currentFamily.id}`)}
           >
             Analyser les relations
           </button>
@@ -346,25 +381,4 @@ export default function PersonDetailPage() {
       </div>
     </div>
   );
-}
-
-// Fonction utilitaire pour calculer l'âge
-function calculateAge(person: Person): string {
-  if (!person.birthDate) return "Inconnu";
-  
-  const birthDate = new Date(person.birthDate);
-  
-  if (person.etat === 'mort' && person.deathDate) {
-    const deathDate = new Date(person.deathDate);
-    const ageMs = deathDate.getTime() - birthDate.getTime();
-    const ageDate = new Date(ageMs);
-    const age = Math.abs(ageDate.getUTCFullYear() - 1970);
-    return `${age} ans au moment du décès`;
-  } else {
-    const today = new Date();
-    const ageMs = today.getTime() - birthDate.getTime();
-    const ageDate = new Date(ageMs);
-    const age = Math.abs(ageDate.getUTCFullYear() - 1970);
-    return `${age} ans`;
-  }
 }

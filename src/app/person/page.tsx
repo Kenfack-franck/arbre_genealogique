@@ -3,11 +3,17 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useFamily } from '../../context/FamilyContext';
-import { Person } from '../../lib/models/Person';
+import { useSearchParams } from 'next/navigation';
+import { useFamily } from '@/context/FamilyContext';
+import { Person } from '@/lib/models/Person';
+import { Family } from '@/lib/models/Families';
 
 export default function PersonsPage() {
-  const { familyTree, loading } = useFamily();
+  const searchParams = useSearchParams();
+  const familyIdParam = searchParams.get('familyId');
+  
+  const { families, activeFamily, loading } = useFamily();
+  const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredPersons, setFilteredPersons] = useState<Person[]>([]);
   const [sortConfig, setSortConfig] = useState<{key: keyof Person, direction: 'asc' | 'desc'}>({
@@ -15,45 +21,62 @@ export default function PersonsPage() {
     direction: 'asc'
   });
 
-  // Filtrer et trier les personnes quand les paramètres changent
+  // Déterminer la famille actuelle
   useEffect(() => {
-    if (!familyTree) return;
-
-    let result = [...familyTree.persons];
-    
-    // Filtrage
-    if (searchTerm) {
-      const lowerSearchTerm = searchTerm.toLowerCase();
-      result = result.filter(person => 
-        person.nom.toLowerCase().includes(lowerSearchTerm) ||
-        person.prenom.toLowerCase().includes(lowerSearchTerm)
-      );
-    }
-    
-    // Tri
-    result.sort((a, b) => {
-      const aValue = a[sortConfig.key];
-      const bValue = b[sortConfig.key];
+    if (!loading) {
+      let family: Family | null = null;
       
-      if (aValue === null && bValue === null) return 0;
-      if (aValue === null) return 1;
-      if (bValue === null) return -1;
-      
-      // Comparaison de chaînes
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return sortConfig.direction === 'asc' 
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
+      if (familyIdParam) {
+        family = families.find(f => f.id === familyIdParam) || null;
+      } else if (activeFamily) {
+        family = activeFamily;
       }
       
-      // Comparaison par défaut
-      return sortConfig.direction === 'asc'
-        ? (aValue > bValue ? 1 : -1)
-        : (bValue > aValue ? 1 : -1);
-    });
-    
-    setFilteredPersons(result);
-  }, [familyTree, searchTerm, sortConfig]);
+      setCurrentFamily(family);
+    }
+  }, [loading, families, activeFamily, familyIdParam]);
+
+  // Filtrer et trier les personnes quand les paramètres changent
+  useEffect(() => {
+    if (currentFamily) {
+      let result = [...currentFamily.persons];
+      
+      // Filtrage
+      if (searchTerm) {
+        const lowerSearchTerm = searchTerm.toLowerCase();
+        result = result.filter(person => 
+          person.nom.toLowerCase().includes(lowerSearchTerm) ||
+          person.prenom.toLowerCase().includes(lowerSearchTerm)
+        );
+      }
+      
+      // Tri
+      result.sort((a, b) => {
+        const aValue = a[sortConfig.key];
+        const bValue = b[sortConfig.key];
+        
+        if (aValue === null && bValue === null) return 0;
+        if (aValue === null) return 1;
+        if (bValue === null) return -1;
+        
+        // Comparaison de chaînes
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
+          return sortConfig.direction === 'asc' 
+            ? aValue.localeCompare(bValue)
+            : bValue.localeCompare(aValue);
+        }
+        
+        // Comparaison par défaut
+        return sortConfig.direction === 'asc'
+          ? (aValue > bValue ? 1 : -1)
+          : (bValue > aValue ? 1 : -1);
+      });
+      
+      setFilteredPersons(result);
+    } else {
+      setFilteredPersons([]);
+    }
+  }, [currentFamily, searchTerm, sortConfig]);
 
   // Fonction pour changer le tri
   const requestSort = (key: keyof Person) => {
@@ -74,10 +97,33 @@ export default function PersonsPage() {
     );
   }
 
+  if (!currentFamily) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-white rounded-lg shadow-md p-6 text-center">
+          <h2 className="text-xl font-semibold mb-2">Aucun arbre généalogique sélectionné</h2>
+          <p className="text-gray-600 mb-6">Veuillez sélectionner un arbre généalogique pour voir ses membres.</p>
+          <Link href="/family" className="btn btn-primary">
+            Voir mes arbres généalogiques
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto px-4 py-8">
+      <div className="mb-6">
+        <Link href={`/family/${currentFamily.id}`} className="text-blue-600 hover:underline inline-flex items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clipRule="evenodd" />
+          </svg>
+          Retour à {currentFamily.name}
+        </Link>
+      </div>
+      
       <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between">
-        <h1 className="text-3xl font-bold mb-4 md:mb-0">Personnes</h1>
+        <h1 className="text-3xl font-bold mb-4 md:mb-0">Personnes de {currentFamily.name}</h1>
         
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative">
@@ -99,7 +145,7 @@ export default function PersonsPage() {
           </div>
           
           <Link 
-            href="/person/new" 
+            href={`/person/new?familyId=${currentFamily.id}`} 
             className="btn btn-primary inline-flex items-center justify-center"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
@@ -219,10 +265,10 @@ export default function PersonsPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex justify-end space-x-2">
-                        <Link href={`/person/${person.id}`} className="text-blue-600 hover:text-blue-900">
+                        <Link href={`/person/${person.id}?familyId=${currentFamily.id}`} className="text-blue-600 hover:text-blue-900">
                           Voir
                         </Link>
-                        <Link href={`/person/${person.id}/edit`} className="text-indigo-600 hover:text-indigo-900">
+                        <Link href={`/person/${person.id}/edit?familyId=${currentFamily.id}`} className="text-indigo-600 hover:text-indigo-900">
                           Modifier
                         </Link>
                       </div>
@@ -234,7 +280,7 @@ export default function PersonsPage() {
                   <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
                     {searchTerm 
                       ? `Aucune personne correspondant à "${searchTerm}" trouvée.` 
-                      : "Aucune personne dans l'arbre généalogique."}
+                      : "Aucune personne dans cet arbre généalogique."}
                   </td>
                 </tr>
               )}
@@ -244,7 +290,7 @@ export default function PersonsPage() {
       </div>
 
       <div className="mt-6 text-gray-600">
-        {filteredPersons.length} personne(s) affichée(s) sur {familyTree?.persons.length || 0} au total
+        {filteredPersons.length} personne(s) affichée(s) sur {currentFamily.persons.length} au total
       </div>
     </div>
   );

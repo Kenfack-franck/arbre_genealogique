@@ -1,43 +1,15 @@
 // src/app/family/page.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useFamily } from '@/context/FamilyContext';
 
-interface FamilyDisplayModel {
-  id: string;
-  name: string;
-  description: string;
-  personCount: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export default function FamilyListPage() {
   const router = useRouter();
-  const { familyTree, loading } = useFamily();
-  const [families, setFamilies] = useState<FamilyDisplayModel[]>([]);
+  const { families, activeFamily, loading, setActiveFamily } = useFamily();
   const [searchTerm, setSearchTerm] = useState('');
-
-  // Chargement des familles
-  useEffect(() => {
-    if (!loading && familyTree) {
-      // Dans cette version simplifiée, nous considérons qu'il n'y a qu'une seule famille
-      // qui correspond à l'arbre généalogique entier
-      const family: FamilyDisplayModel = {
-        id: '1', // ID unique pour l'unique famille
-        name: familyTree.metadata.nom,
-        description: `Arbre généalogique principal avec ${familyTree.persons.length} membres`,
-        personCount: familyTree.persons.length,
-        createdAt: familyTree.metadata.dateCreation,
-        updatedAt: familyTree.metadata.dateMiseAJour
-      };
-
-      setFamilies([family]);
-    }
-  }, [familyTree, loading]);
 
   // Filtrage des familles selon le terme de recherche
   const filteredFamilies = families.filter(family => 
@@ -95,7 +67,12 @@ export default function FamilyListPage() {
       {filteredFamilies.length > 0 ? (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {filteredFamilies.map(family => (
-            <div key={family.id} className="bg-white rounded-lg shadow-md overflow-hidden">
+            <div 
+              key={family.id} 
+              className={`bg-white rounded-lg shadow-md overflow-hidden ${
+                activeFamily?.id === family.id ? 'ring-2 ring-blue-500' : ''
+              }`}
+            >
               <div className="p-6">
                 <h2 className="text-xl font-semibold mb-2">{family.name}</h2>
                 <p className="text-gray-600 mb-4">{family.description}</p>
@@ -104,7 +81,7 @@ export default function FamilyListPage() {
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z" />
                   </svg>
-                  {family.personCount} {family.personCount > 1 ? 'personnes' : 'personne'}
+                  {family.persons.length} {family.persons.length > 1 ? 'personnes' : 'personne'}
                 </div>
                 
                 <div className="flex items-center text-sm text-gray-500 mb-6">
@@ -115,17 +92,24 @@ export default function FamilyListPage() {
                 </div>
                 
                 <div className="flex space-x-3">
+                  {activeFamily?.id !== family.id ? (
+                    <button
+                      onClick={() => setActiveFamily(family.id)}
+                      className="flex-1 btn btn-secondary text-center"
+                    >
+                      Activer
+                    </button>
+                  ) : (
+                    <span className="flex-1 bg-green-100 text-green-800 text-center py-2 px-4 rounded font-medium">
+                      Actif
+                    </span>
+                  )}
+                  
                   <Link
                     href={`/family/${family.id}`}
                     className="flex-1 btn btn-primary text-center"
                   >
                     Ouvrir
-                  </Link>
-                  <Link
-                    href={`/family/${family.id}/tree`}
-                    className="flex-1 btn btn-secondary text-center"
-                  >
-                    Voir l'arbre
                   </Link>
                 </div>
               </div>
