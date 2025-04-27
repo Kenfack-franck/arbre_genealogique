@@ -55,6 +55,11 @@ export default function RootLayout({
                           Recherche
                         </Link>
                       </li>
+                      <li>
+                        <Link href="/graph-algorithms" className="hover:text-blue-600 transition">
+                          Algorithmes de graphes
+                        </Link>
+                      </li>
                     </ul>
                   </nav>
                 </div>
