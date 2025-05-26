@@ -46,6 +46,11 @@ export default function RootLayout({
                         </Link>
                       </li>
                       <li>
+                        <Link href="/full-tree" className="hover:text-blue-600 transition">
+                          Arbre Complet
+                        </Link>
+                      </li>
+                      <li>
                         <Link href="/person" className="hover:text-blue-600 transition">
                           Personnes
                         </Link>
